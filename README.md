@@ -1,27 +1,21 @@
 # Remove all subscriptions and alerts
 
-A small script to bulk-remove every dashboard subscription and alert from a
-Metabase instance.
+Stop every dashboard subscription and alert on a Metabase instance from sending anything out, by removing them for good.
 
-## Warning: this is not reliably reversible
+If you're self-hosted, you could try unsetting `MB_EMAIL_SMTP_HOST` and `MB_SLACK_APP_TOKEN` on the Metabase server so it has nowhere to send email or Slack messages. That stops delivery, but the subscriptions and alerts still run on schedule; they just fail silently instead of reaching anyone. This script removes them entirely, so they stop firing at all.
 
-Running this with `--execute` archives every dashboard subscription and
-alert on the instance. Archiving is Metabase's only "delete" for these
-resources (there's no hard delete via the API), but there is no restore
-button in this script, and the alert bulk-archive endpoint has no
-corresponding bulk-unarchive action to reverse it with. Treat this as
-permanent, and only run it against an instance where that's actually what
-you want.
+## This isn't reliably reversible
+
+Running the script with `--execute` archives every dashboard subscription and alert on the instance. Archiving is the only "delete" Metabase supports for these resources through its API, but this script has no restore command, and the alert bulk-archive endpoint has no bulk-unarchive counterpart to reverse it with. Treat this as permanent, and only run it against an instance where that's what you actually want.
 
 ## Requirements
 
 - Python 3
 - `pip install requests`
 
-## Setup
+## Set up the script
 
-Open `clean_all_subs.py` and update these three values at the top for your
-instance:
+Open `clean_all_subs.py` and update these three values at the top for your instance:
 
 ```python
 BASE_URL = "https://your-metabase-instance.example.com"
@@ -29,25 +23,25 @@ USERNAME = "your-admin-email@example.com"
 PASSWORD = "your-admin-password"
 ```
 
-The account must be an admin, since removing alerts uses an admin-only API
-endpoint.
+The account needs to be an admin, since removing alerts uses an admin-only API endpoint.
 
-If you'd rather use an API key than a username/password, remove the call to
-`authenticate()` in `main()` and set it directly instead:
+If you'd rather authenticate with an API key than a username and password, remove the call to `authenticate()` in `main()` and set the header directly instead:
 
 ```python
 SESSION.headers["X-API-Key"] = "<your-api-key>"
 ```
 
-## Usage
+If you're self-hosting, unset `MB_EMAIL_SMTP_HOST` and `MB_SLACK_APP_TOKEN` on the Metabase server before you create test subscriptions and alerts, and they'll fail silently instead of emailing or messaging anyone. This only affects delivery - listing, archiving, and re-checking through the API all work the same either way. Handy if you want to try the script out safely before running it for real.
 
-Dry run (default) — shows what would be removed, without changing anything:
+## Run it
+
+Dry run (the default) shows what would be removed, without changing anything:
 
 ```
 python clean_all_subs.py
 ```
 
-Actually remove everything (asks for a `yes` confirmation first):
+Actually remove everything (asks you to type `yes` to confirm first):
 
 ```
 python clean_all_subs.py --execute
@@ -55,10 +49,7 @@ python clean_all_subs.py --execute
 
 ## What it does
 
-- Lists all active dashboard subscriptions and alerts.
-- Archives each dashboard subscription individually.
+- Lists every active dashboard subscription and alert.
+- Archives each dashboard subscription one at a time.
 - Archives all alerts in a single bulk request.
-- Re-checks afterward and confirms nothing active is left.
-
-Removal here means archiving — Metabase doesn't support a hard delete for
-either resource through its API.
+- Checks again afterward to confirm nothing active is left.

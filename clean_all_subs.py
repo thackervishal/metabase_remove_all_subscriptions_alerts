@@ -11,6 +11,7 @@ BASE_URL = "https://your-metabase-instance.example.com"
 USERNAME = "your-admin-email@example.com"
 PASSWORD = "your-admin-password"
 
+# One pooled/reused connection instead of a new one per call, plus retries on transient connection drops - safe here since both archive operations below are idempotent.
 SESSION = requests.Session()
 _retry_adapter = HTTPAdapter(max_retries=Retry(
     total=3, connect=3, read=3, backoff_factor=0.3,
@@ -37,10 +38,12 @@ def get_alert_ids():
 
 
 def pulse_label(p):
+    # "Pulse" is the internal/legacy name; if dashboard_id is set it's what the UI calls a dashboard subscription, otherwise it's a pre-dashboard-subscriptions standalone pulse (not creatable from the UI anymore, but can still exist in older data).
     return f"dashboard subscription (dashboard {p['dashboard_id']})" if p.get("dashboard_id") else "standalone pulse"
 
 
 def archive_pulses(pulses, execute):
+    # There's no true DELETE for pulses - archiving via PUT .../:id {"archived": true} is the only removal path, and it's synchronous (committed before the response comes back).
     if not pulses:
         print("None to remove.")
     for p in pulses:
@@ -57,6 +60,7 @@ def archive_pulses(pulses, execute):
 
 
 def archive_alerts(alert_ids, execute):
+    # Alerts have no per-id update/delete endpoint; the admin bulk-archive endpoint is the only path, and it's scoped server-side to alerts only.
     if not alert_ids:
         print("None to remove.")
         return
@@ -69,8 +73,7 @@ def archive_alerts(alert_ids, execute):
     if updated == len(alert_ids):
         print(f"Bulk-archived {updated} alert(s): {resp.text}")
     else:
-        print(f"FAILED to bulk-archive alerts (HTTP {resp.status_code}, expected {len(alert_ids)} updated): "
-              f"{resp.text}", file=sys.stderr)
+        print(f"FAILED to bulk-archive alerts (HTTP {resp.status_code}, expected {len(alert_ids)} updated): {resp.text}", file=sys.stderr)
 
 
 def main():
@@ -83,8 +86,7 @@ def main():
     pulses = get_pulses()
     alert_ids = get_alert_ids()
     sub_count = sum(1 for p in pulses if p.get("dashboard_id"))
-    print(f"Found {sub_count} active dashboard subscription(s), {len(pulses) - sub_count} active standalone "
-          f"pulse(s), {len(alert_ids)} active alert(s).")
+    print(f"Found {sub_count} active dashboard subscription(s), {len(pulses) - sub_count} active standalone pulse(s), {len(alert_ids)} active alert(s).")
 
     if not pulses and not alert_ids:
         print("Nothing to delete.")
@@ -99,9 +101,7 @@ def main():
         print("\nRe-run with --execute to actually archive these.")
         return
 
-    confirm = input(f"\nAbout to archive {sub_count} dashboard subscription(s), "
-                     f"{len(pulses) - sub_count} standalone pulse(s), and {len(alert_ids)} alert(s). "
-                     f"This cannot be easily undone (see README). Type 'yes' to confirm: ")
+    confirm = input(f"\nAbout to archive {sub_count} dashboard subscription(s), {len(pulses) - sub_count} standalone pulse(s), and {len(alert_ids)} alert(s). This cannot be easily undone (see README). Type 'yes' to confirm: ")
     if confirm != "yes":
         sys.exit("Aborted.")
 
@@ -112,10 +112,10 @@ def main():
     archive_alerts(alert_ids, execute=True)
 
     print("\n== Retesting ==")
+    # No delay needed here - archiving above is synchronous, so the DB is already consistent by the time these GETs run.
     pulses_remaining = len(get_pulses())
     alerts_remaining = len(get_alert_ids())
-    print(f"After cleanup: {pulses_remaining} active dashboard subscription(s)/pulse(s), "
-          f"{alerts_remaining} active alert(s) remain.")
+    print(f"After cleanup: {pulses_remaining} active dashboard subscription(s)/pulse(s), {alerts_remaining} active alert(s) remain.")
 
     print("\n== Done ==")
     if pulses_remaining == 0 and alerts_remaining == 0:
